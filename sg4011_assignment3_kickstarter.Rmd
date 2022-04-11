@@ -1,0 +1,517 @@
+---
+title: "Assignment 3: Kickstarter Projects"
+author: Nikki Gerjarusak
+date: 2022-03-24
+always_allow_html: yes
+output: 
+  html_document:
+    keep_md: true
+---
+
+Text Mining Kickstarter Projects
+================================
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+Kickstarter is an American public-benefit corporation based in Brooklyn, New York, that maintains a global crowd funding platform focused on creativity.  The company's stated mission is to "help bring creative projects to life". 
+
+Kickstarter has reportedly received almost $6 billion in pledges from 20 million backers to fund more than 200,000 creative projects, such as films, music, stage shows, comics, journalism, video games, technology and food-related projects.
+
+For this assignment, I am asking you to analyze the descriptions of kickstarter projects to identify commonalities of successful (and unsuccessful projects) using the text mining techniques we covered in the past two lectures. 
+
+## Data
+
+The dataset for this assignment is taken from [webroboto.io ‘s repository](https://webrobots.io/kickstarter-datasets/). They developed a scrapper robot that crawls all Kickstarter projects monthly since 2009. I noticed that the most recent crawls appear to be incomplete, so we will take data from the last complete crawl on 2021-05-17.
+
+To simplify your task, I have downloaded the files and partially cleaned the scraped data. In particular, I converted several JSON columns, corrected some obvious data issues, and removed some variables that are not of interest (or missing frequently), and removed some duplicated project entries. I have also  subsetted the data to only contain projects with locations set to the United States (to have only English language and USD denominated projects). Some data issues surely remain, so please adjust as you find it necessary to complete the analysis. 
+
+The data is contained in the file `kickstarter_projects_2021_05.csv` and contains about 131k projects and about 20 variables.
+
+```{r}
+library(readr)
+library(dplyr)
+library(tidymodels)
+library(tidyverse)
+## load dataset 
+setwd('/Users/nikkigerjarusak/Documents/GitHub/assignment-3---kickstarter-nikkigsak/')
+df <- read_csv("kickstarter_projects_2021-05.csv")
+
+```
+
+## Tasks for the Assignment
+
+### 1. Identifying Successful Projects
+
+#### a) Success by Category
+
+There are several ways to identify success of a project:  
+  - State (`state`): Whether a campaign was successful or not.   
+  - Pledged Amount (`pledged`)   
+  - Achievement Ratio: The variable `achievement_ratio` is calculating the percentage of the original monetary `goal` reached by the actual amount `pledged` (that is `pledged`\\`goal` *100).    
+  - Number of backers (`backers_count`)  
+  - How quickly the goal was reached (difference between `launched_at` and `state_changed_at`) for those campaigns that were successful.  
+
+Use two of these measures to visually summarize which categories were most successful in attracting funding on kickstarter. Briefly summarize your findings.
+
+```{r}
+cat_1 <- df %>%
+  group_by(top_category) %>% 
+  summarize(total_pledged = sum(pledged))
+
+library(plotly)
+
+success1 <- ggplot(cat_1, aes(x = top_category, y = total_pledged, fill = top_category)) +
+  geom_bar(position = "dodge", stat = "identity") +  theme(axis.text.x = element_text(angle = 45)) +
+  labs (x = "Categories", y = "Amount Pledged",
+        title = "Amount Pledged Per Category")
+ggplotly(success1)
+```
+
+In the plot above, we can see that the categories that get the largest pledged amount are by far technology, followed by film & video and games. 
+
+```{r}
+cat_2 <- df %>%
+  group_by(top_category) %>% 
+  summarize(total_backers = sum(backers_count))
+
+success2 <- ggplot(cat_2, aes(x = top_category, y = total_backers, fill = top_category)) +
+  geom_bar(position = "dodge", stat = "identity") +  theme(axis.text.x = element_text(angle = 45)) +
+  labs (x = "Categories", y = "Number of Backers",
+        title = "Backers Per Category")
+ggplotly(success2)
+```
+
+In measuring success by the number of backers, technology is also the category with the most. However, the discrepancy between technology and the following two categories games and film & video is not as large as when measuring success by amount pledged.
+
+#### **BONUS ONLY:** b) Success by Location
+
+Now, use the location information to calculate the total number of successful projects by state (if you are ambitious, normalize by population). Also, identify the Top 50 "innovative" cities in the U.S. (by whatever measure you find plausible). Provide a leaflet map showing the most innovative states and cities in the U.S. on a single map based on these information.
+
+```{r}
+locat_1 <- df %>%
+  group_by(location_state) %>%
+  summarize(total_pledged = sum(pledged)) %>%
+  arrange(desc(total_pledged)) 
+
+top_cities <- df %>%
+  group_by(location_town) %>%
+  summarize(total_pledged = sum(pledged)) %>%
+  arrange(desc(total_pledged)) %>%
+  slice(1:50)
+```
+
+### 2. Writing your success story
+
+Each project contains a `blurb` -- a short description of the project. While not the full description of the project, the short headline is arguably important for inducing interest in the project (and ultimately popularity and success). Let's analyze the text.
+
+#### a) Cleaning the Text and Word Cloud
+
+To reduce the time for analysis, select the 1000 most successful projects and a sample of 1000 unsuccessful projects (by a metric of your choice). Use the cleaning functions introduced in lecture (or write your own in addition) to remove unnecessary words (stop words), syntax, punctuation, numbers, white space etc. Note, that many projects use their own unique brand names in upper cases, so try to remove these fully capitalized words as well (since we are aiming to identify common words across descriptions). Create a document-term-matrix.
+
+
+```{r}
+## df$pledged <- as.integer(df$pledged)
+##drop_na(df, pledged)
+
+## select top 1000 by amount pledged
+top_1000 <- df %>% 
+  filter(state=='successful') %>%
+  arrange(desc(pledged)) %>%
+  ungroup() %>%
+  slice(1:1000)
+
+## select bottom 1000 by amount pledged
+bottom_1000 <- df %>% 
+  filter(state=='failed') %>%
+  arrange(pledged) %>%
+  ungroup() %>%
+  slice(1:1000)
+
+## merge to create df
+## data <- rbind(top_1000, bottom_1000)
+```
+
+```{r}
+## top 1000 successful projects
+library(tm)
+
+top_text <- top_1000$blurb
+corp <- Corpus(VectorSource(top_text))
+
+## clean text by removing characters
+text_fun <- content_transformer(function (x , pattern ) gsub(pattern, " ", x))
+corp <- tm_map(corp, text_fun, "/")
+corp <- tm_map(corp, text_fun, "@")
+corp <- tm_map(corp, text_fun, "\\|")
+
+## lowercase
+corp <- tm_map(corp, content_transformer(tolower))
+
+## remove numbers
+corp <- tm_map(corp, removeNumbers)
+
+## remove stopwords
+corp <- tm_map(corp, removeWords, stopwords("english"))
+
+## remove punctuation
+corp <- tm_map(corp, removePunctuation)
+
+## remove extra white spaces
+corp <- tm_map(corp, stripWhitespace)
+
+## stemming
+corp <- tm_map(corp, stemDocument)
+
+## lemmatize
+library(textstem)
+clean_corp <- lemmatize_words(corp)
+```
+```{r}
+library(tidytext)
+## successful projects document-term-matrix
+
+## build matrix
+top_dtm <- DocumentTermMatrix(clean_corp) 
+top_td <- tidy(top_dtm)
+
+
+top_lemma <- top_td %>%
+  mutate(lemma = lemmatize_words(term))
+top_lemma <- top_lemma %>%
+  group_by(lemma) %>% 
+  summarize(count = sum(count))
+
+```
+
+
+```{r}
+## bottom 1000 failed projects
+bottom_text <- bottom_1000$blurb
+corp_1 <- Corpus(VectorSource(bottom_text))
+
+## clean text by removing characters
+text_fun <- content_transformer(function (x , pattern ) gsub(pattern, " ", x))
+corp_1 <- tm_map(corp_1, text_fun, "/")
+corp_1 <- tm_map(corp_1, text_fun, "@")
+corp_1 <- tm_map(corp_1, text_fun, "\\|")
+
+## lowercase
+corp_1 <- tm_map(corp_1, content_transformer(tolower))
+
+## remove numbers
+corp_1 <- tm_map(corp_1, removeNumbers)
+
+## remove stopwords
+corp_1 <- tm_map(corp_1, removeWords, stopwords("english"))
+
+## remove punctuation
+corp_1 <- tm_map(corp_1, removePunctuation)
+
+## remove extra white spaces
+corp_1 <- tm_map(corp_1, stripWhitespace)
+
+## stemming
+corp_1 <- tm_map(corp_1, stemDocument)
+
+## lemmatize
+clean_corp1 <- lemmatize_words(corp_1)
+```
+```{r}
+## failed projects document-term-matrix
+
+## build matrix
+bottom_dtm <- DocumentTermMatrix(clean_corp1) 
+bottom_td <- tidy(bottom_dtm)
+
+bottom_lemma <- bottom_td %>%
+  mutate(lemma = lemmatize_words(term))
+bottom_lemma <- bottom_lemma %>%
+  group_by(lemma) %>% 
+  summarize(count = sum(count))
+```
+
+
+Provide a word cloud of the most frequent or important words (your choice which frequency measure you choose) among the most successful projects.
+
+```{r}
+library(wordcloud)
+set.seed(1234)
+wordcloud(words = top_lemma$lemma, freq = top_lemma$count, min.freq = 7,
+          max.words=100, random.order=FALSE, 
+          colors=brewer.pal(9, "Dark2"))
+```
+
+#### b) Success in words
+
+Provide a pyramid plot to show how the words between successful and unsuccessful projects differ in frequency. A selection of 10 - 20 top words is sufficient here. 
+
+```{r}
+top_tdm1 <- TermDocumentMatrix(clean_corp) 
+top_mat <- as.matrix(top_tdm1)
+top_tdm_v <- sort(rowSums(top_mat), decreasing = TRUE)
+top_tdm_d <- data.frame(word = names(top_tdm_v), freq = top_tdm_v)
+
+bottom_tdm1 <-TermDocumentMatrix(clean_corp1)
+bottom_mat <- as.matrix(bottom_tdm1)
+bottom_tdm_v <- sort(rowSums(bottom_mat), decreasing = TRUE)
+bottom_tdm_d <- data.frame(word = names(bottom_tdm_v), freq = bottom_tdm_v)
+
+## create merged data frame
+data = merge(x = top_tdm_d, y = bottom_tdm_d, by = 'word')
+colnames(data)[colnames(data) %in% c("freq.x", "freq.y")] <- c("successful", "unsuccessful")
+colnames(data) 
+data$final <- data$successful + data$unsuccessful
+
+## top 20
+data_pyramid<-data %>% 
+  arrange(desc(final)) %>%
+  mutate(rank=row_number()) %>%
+  filter(rank<=20)
+```
+
+```{r}
+## pyramid plot
+library(plotrix)
+pyr_plot <- pyramid.plot(data_pyramid$successful, data_pyramid$unsuccessful,
+                  labels = data_pyramid$word,
+             gap = 10,
+             top.labels = c("Successful Words", " ", "Unsuccessful Words"),
+             main = "Top 20 Words in Successful and Unsuccessful projects",
+             laxlab = NULL,
+             raxlab = NULL,
+             unit = NULL,
+             labelcex=0.8)
+```
+
+#### c) Simplicity as a virtue
+
+These blurbs are short in length (max. 150 characters) but let's see whether brevity and simplicity still matters. Calculate a readability measure (Flesh Reading Ease, Flesh Kincaid or any other comparable measure) for the texts. Visualize the relationship between the readability measure and one of the measures of success. Briefly comment on your finding.
+
+```{r}
+require(quanteda)
+require(dplyr)
+require(quanteda.textstats)
+## successful projects
+top_corpus <- corpus(top_text)
+FRE_top <- textstat_readability(top_corpus,
+              measure=c('Flesch.Kincaid'))
+FRE_top
+
+## merge
+topFRE <- cbind(top_1000, FRE_top)
+
+## plot
+plot_FRE <- ggplot(topFRE, aes(x = pledged, y=Flesch.Kincaid, color = pledged, size = pledged)) + 
+  geom_point(alpha = 0.5) + 
+  geom_smooth(method='lm', color = 'red', se = F) + 
+  ggthemes::theme_tufte() +
+  labs(
+    x = "Amount Pledged",
+    y = "Flesch Kincaid Readability Score",
+    title = "Relationship Between Amount Pledged and Readability of Text for Successful Projects")
+ggplotly(plot_FRE)
+```
+In measuring project success by amount pledged, we can see from the plot that there is not much of a clear relationship between readability score and amount pledged. However, the data point that has the largest amount pledged does have a higher readability score. 
+
+### 3. Sentiment
+
+Now, let's check whether the use of positive / negative words or specific emotions helps a project to be successful. 
+
+#### a) Stay positive
+
+Calculate the tone of each text based on the positive and negative words that are being used. You can rely on the Hu & Liu dictionary provided in lecture or use the Bing dictionary contained in the tidytext package (`tidytext::sentiments`). Visualize the relationship between tone of the document and success. Briefly comment.
+
+```{r}
+## load sentiment dictionary
+pos <- read.table('/Users/nikkigerjarusak/Documents/github/course_content/Lectures/Week09/data/dictionaries/positive-words.txt', as.is=T)
+neg <- read.table('/Users/nikkigerjarusak//Documents/github/course_content/Lectures/Week09/data/dictionaries/negative-words.txt', as.is=T)
+
+sentiment <- function(words=c("really great good stuff bad")){
+  require(quanteda)
+  tok <- quanteda::tokens(words)
+  pos.count <- sum(tok[[1]]%in%pos[,1])
+  neg.count <- sum(tok[[1]]%in%neg[,1])
+  out <- (pos.count - neg.count)/(pos.count+neg.count)
+}
+
+```
+
+```{r}
+set.seed(1234)
+
+## get random sample of 2000
+random_df <- sample_n(df, 2000)
+
+## clean random sample 
+random_df$blurb <- gsub("&amp", " ", random_df$blurb)
+random_df$blurb <- gsub("(RT|via)((?:\\b\\W*@\\w+)+)", " ", random_df$blurb)
+random_df$blurb <- gsub("@\\w+", " ", random_df$blurb)
+random_df$blurb <- gsub("[[:punct:]]", " ", random_df$blurb)
+random_df$blurb <- gsub("[[:digit:]]", " ", random_df$blurb)
+random_df$blurb <- gsub("http\\w+", " ", random_df$blurb)
+random_df$blurb <- gsub("[ \t]{2,}", " ", random_df$blurb)
+random_df$blurb <- gsub("ˆ\\s+|\\s+$", " ", random_df$blurb)
+random_df$blurb <- gsub("\n", " ", random_df$blurb)
+random_cleaned <- random_df$blurb
+
+random_sent <- data.frame(mapply(sentiment, random_cleaned))
+random_sent <- data.frame(random_sent)
+random_sent[is.na(random_sent)] <- 0
+colnames(random_sent) <- c('Sentiment')
+random_sent <- random_sent %>% 
+  mutate(rn = row_number())
+
+random_df <- random_df %>% 
+  mutate(rn = row_number())
+random_data <- merge(random_sent, random_df, by= "rn")
+
+## sentiment vs amount pledged plot
+sent_plot <- ggplot(data = random_data, aes(x = Sentiment, y = pledged)) + 
+  geom_smooth(method= "loess",color= "black") +  labs(
+    x = "Sentiment Score",
+    y = "Amount Pledged",
+    title = "Text Sentiment Score vs. Amount Pledged")
+sent_plot
+```
+Documents with higher sentiment scores (more positive) tend to get a larger amount pledged to the project. However, we can see a dip at the end of the graph as documents that are too positive don't achieve a higher amount pledged. We can see that there is a sweet spot of a sentiment score betweem .5 and 1.0 that receive the largest amount pledged.
+
+#### b) Positive vs negative
+
+Segregate all 2,000 blurbs into positive and negative texts based on their polarity score calculated in step (a). Now, collapse the positive and negative texts into two larger documents. Create a document-term-matrix based on this collapsed set of two documents. Generate a comparison cloud showing the most-frequent positive and negative words.
+
+```{r}
+set.seed(1234)
+## random 2000 sample
+random_sample <- sample_n(df, 2000)
+random_text <- random_sample$blurb
+
+## clean using tidytext
+random_text  <- tolower(random_text)
+random_text <- removePunctuation(random_text)
+random_text<- removeNumbers(random_text)
+random_text <- stripWhitespace(random_text)
+random_text <- removeWords(random_text, stopwords("en"))
+random_text <- lemmatize_words(random_text)
+
+## apply sentiment function
+text_sentiment <- data.frame(mapply(sentiment, random_text))
+
+## merge 
+final_sent <- cbind(random_sample, text_sentiment)
+```
+
+```{r}
+final_sentiment <- final_sent$blurb 
+final_sent_corp <- VCorpus(VectorSource(final_sentiment))
+
+final_sent_corp <- tm_map(final_sent_corp,
+    content_transformer(function(x) iconv(x, to='UTF-8-MAC', sub='byte')))
+final_sent_corp <- tm_map(final_sent_corp, PlainTextDocument)
+final_sent_corp  <- tm_map(final_sent_corp, removeWords, stopwords("english"))
+final_sent_corp <- tm_map(final_sent_corp, removePunctuation)
+final_sent_corp  <- tm_map(final_sent_corp, removeNumbers)
+final_sent_corp  <- tm_map(final_sent_corp, content_transformer(tolower))
+
+final_sent_dtm <- DocumentTermMatrix(final_sent_corp)
+final_sent_dtm  <- tidy(final_sent_dtm)
+
+sent_clean <- final_sent_dtm  %>%
+  mutate(clean_word = lemmatize_words(term))
+
+bing <- get_sentiments('bing')
+final_sent_clean <-merge(sent_clean, bing,by.x='clean_word',by.y='word')
+
+
+words <- final_sent_clean  %>%
+  group_by(clean_word)%>%
+  summarize(count=n(), sentiment=first(sentiment)) %>%
+  arrange(count)
+
+## comparison word cloud
+library(reshape2)
+matrix<- acast(words, clean_word~sentiment, value.var='count', fill=0)
+comparison.cloud(matrix, colors=c('blue', 'pink'))
+```
+citation: referred to code found here: https://gist.github.com/rer145/8f31af53a9a8339dddbef93fd10e86ce
+
+#### c) Get in their mind
+
+Now, use the NRC Word-Emotion Association Lexicon in the `tidytext` package to identify a larger set of emotions (anger, anticipation, disgust, fear, joy, sadness, surprise, trust). Again, visualize the relationship between the use of words from these categories and success. What is your finding?
+
+```{r}
+nrc <-  get_sentiments("nrc")
+unique(nrc$sentiment)
+```
+
+```{r}
+for (i in c("trust","fear","negative","sadness", "anger", "surprise","positive","disgust","joy","anticipation"))
+{
+assign(paste('nrc', '_', i, sep=""), dplyr::filter(nrc, sentiment==i))
+}
+```
+
+
+```{r}
+## create NRC df
+nrc_text <- data.frame(doc_id = topFRE$document, pledged = topFRE$pledged
+                       , text= topFRE$blurb)
+
+## assign emotions
+for (i in 1:1000)
+{
+  indiv_text = nrc_text$text[i]
+  tok <- quanteda::tokens(indiv_text)
+  for (x in c("trust","fear","negative","sadness", "anger", "surprise","positive","disgust","joy","anticipation"))
+  {
+    result = sum(tok[[1]]%in%unlist(subset(nrc, sentiment==x, select=word)))
+    nrc_text[i,x] = result
+  }
+}
+```
+```{r}
+## create column with emotions
+colnms=c("trust","fear","negative","sadness", "anger", "surprise","positive","disgust","joy","anticipation")
+
+for (emolex in c("trust","fear","negative","sadness", "anger", "surprise","positive","disgust","joy","anticipation"))
+{
+print(ggplot2::ggplot(data = nrc_text, aes( x = nrc_text[,emolex], y = pledged)) + 
+  geom_col() + 
+    scale_y_continuous(labels = scales::comma) + 
+  labs(
+    x = stringr::str_to_title(emolex),
+    y = "Amount Pledged",
+    title = paste(stringr::str_to_title(emolex), "Sentiment/Emotion")
+  ) + 
+   ggthemes::theme_tufte()) 
+}
+```
+In the bar plots above, the data set only contains top 1000 successful projects. Projects with words that have positive association tend to have more pledged amounts, but like our sentiment analysis findings, blurbs that are too positive have diminishing returns. Emotions that are associated with positive sentiment such as trust, joy and anticipation all have more similar relationships with amount pledged (measure of success). Another important factor to note is how across all emotions/sentiments, the "0" value is dominant. This represents the limitations to using NRC Emolex dictionary, since it is also taking into consideration the corpuses that do not contain any matches from the dictionary. 
+
+
+
+```{r}
+## random_sent <- random_sent %>% 
+ ##  mutate(rn = row_number())
+
+## nrc_sent <- final_sent_dtm %>%
+  ## inner_join(get_sentiments('nrc'), by='word')
+
+
+## nrc_sent_n <- nrc_sent %>%
+  ## group_by(sentiment)%>%
+  ## tally %>%
+  ## arrange(desc(n))
+```
+
+
+## Submission
+
+Please add the hash of your final commit in the feedback pull request to submit your homework. The homework is due on Monday, April 4 at 5pm.
+
+## Please stay honest!
+
+If you do come across something online that provides part of the analysis / code etc., please no wholesale copying of other ideas. We are trying to evaluate your abilities to visualized data not the ability to do internet searches. Also, this is an individually assigned exercise -- please keep your solution to yourself. 
