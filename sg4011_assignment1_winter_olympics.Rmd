@@ -1,0 +1,510 @@
+---
+title: 'Assignment 1: Using ggplot2 for visualization'
+author: "Nikki Gerjarusak"
+always_allow_html: yes
+output:
+  pdf_document: default
+  html_document:
+    keep_md: yes
+---
+
+Winter Olympics Medals over Time
+================================
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Scenario
+
+Imagine you are the data scientist at a respected media outlet -- say the "New York Times". For the Winter Olympics coverage, your editor-in-chief asks you to analyze some data on the history of `Winter Olympics Medals by Year, Country, Event and Gender` and prepare some data visualizations in which you outline the main patterns around which to base the story.
+
+Since there is **no way that all features of the data can be represented** in such a memo, feel free to pick and choose some patterns that would make for a good story -- outlining important patterns and presenting them in a visually pleasing way. 
+
+The full background and text of the story will be researched by a writer of the magazine -- your input should be based on the data and some common sense (i.e. no need to read up on this). 
+
+Provide **polished plots** that are refined enough to include in the magazine with very little further manipulation (already include variable descriptions [if necessary for understanding], titles, source [e.g. "International Olympic Committee"], right color etc.) and are understandable to the average reader of the "New York Times". The design does not need to be NYTimes-like. Just be consistent.
+
+## Data
+
+The main data is provided as an excel sheet, containing the following variables on all participating athletes in all olympics from 1896 to 2016 (sadly, the original source of the data no longer updates beyond that year):
+
+  - `ID`: a unique indentifier of the entry
+  - `Name`: name of the athlete
+  - `Sex`: sex of the athlete
+  - `Age`: age of the athlete
+  - `Height`: height of the athlete
+  - `Weight`: weight of the athlete
+  - `Team`: usually the country team of the athlete, with the exception of political accomodations, e.g. the "Refugee Olympic Athletes" team.
+  - `NOC`: national olympic comittee abbreviation.
+  - `Games`: year and season of games.
+  - `Year`: year of games
+  - `Season`: season of games.
+  - `City`: host city
+  - `Sport`: a grouping of disciplines
+  - `Event`: the particular event / competition  
+  - `Medal`: the particular event / competition  
+
+For example, an `event` is a competition in a sport or discipline that gives rise to a ranking. Thus `Alpine Skiing` is the discipline, and `Alpine Skiing Women's Downhills` is a particular event.
+
+In addition, you are provided with some additional information about the countries in a separate spreadsheet, including the `IOC Country	Code`, `Population`, and `GDP per capita`.
+
+## Tasks
+
+#### 1. Medal Counts over Time
+
+a) Combine the information in the three spreadsheets `athletes_and_events.csv`, `noc_regions.csv`, and  `gdp_pop.csv`. Note, that the `noc_regions.csv` is the set all NOC regions, while `gdp_pop.csv` only contains a snapshot of the current set of countries. You have to decide what to do with some [countries that competed under different designations in the past (e.g. Germany and Russia)](https://en.wikipedia.org/wiki/All-time_Olympic_Games_medal_table) and some defunct countries and whether and how to combine their totals. Make sure to be clear about your decisions here, so that the editor (and potentially a user of your visualizations) understands what you did.
+
+```{r}
+## load in data sets
+library(readr)
+setwd('/Users/nikkigerjarusak/Documents/GitHub/assignment-1---winter-olympics-nikkigsak/data')
+athletes_events <- read_csv("athletes_and_events.csv")
+noc_regions <- read_csv("noc_regions.csv")
+gdp_pop <- read_csv("gdp_pop.csv")
+```
+```{r}
+library(dplyr)
+library(tidymodels)
+library(ggplot2)
+## merge datasets 
+df <- merge(athletes_events, noc_regions, by="NOC") ## merge by NOC 
+gdp_pop <- gdp_pop %>%
+  rename(NOC = Code)
+df1 <- merge(df, gdp_pop, by="NOC")
+
+
+## totals by NOC  
+df1 %>% 
+  group_by(NOC) %>%
+  summarize(Games = n())
+```
+
+
+b) Calculate a summary of how many winter games each country competed in, and how many medals of each type the country won. Use that summary to provide a **visual comparison of medal count by country**. 
+
+```{r}
+## summary of how many winter games
+df1 %>% 
+  group_by(NOC) %>%
+  filter(Season == 'Winter') %>%
+  summarize(Season = n())
+```
+
+```{r}
+## winter medals
+medal <- df1 %>% filter(!is.na(Medal)) %>% 
+  filter(Season == 'Winter') %>%
+  group_by(NOC, Medal) %>%
+  summarize(isMedal = n()) 
+
+medalcount <- df1 %>% filter(!is.na(Medal)) %>% 
+  filter(Season == 'Winter') %>%
+  group_by(NOC, Medal) %>%
+  summarize(isMedal = n()) %>%
+   pivot_wider(
+    names_from = Medal,
+    values_from = isMedal
+  )
+medalcount
+```
+
+```{r}
+## count medals by country won in winter games
+medal <-  medal %>% 
+  group_by(NOC, Medal) %>%
+  summarize(Count = sum(isMedal))
+
+## plot medals won by each country 
+ggplot(medal, aes(x=NOC, y=Count, fill=Medal)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values=c("red","yellow","gray")) +
+  labs(x = "Countries", y = "Count", 
+       title="Olympic Winter Medals")
+```
+
+Feel free to focus on smaller set of countries (say the top 10), highlight the United States or another country of your choice, consider gender of the medal winners etc. to make the visualization interesting. 
+
+Please provide (i) one visualization showing an over time comparison and (ii) one visualization in which a total medal count (across all Winter Olympics) is used. Briefly discuss which visualization you recommend to your editor and why.
+
+**Note:** Currently, the medal data contains information on _each athlete_ competing, including for team events. For example, in 2014 Russia received _4 gold medals for their men's win in Bobsleigh Men's Four_ alone. Since this is usually not how it is done in official medal statistics, try to wrangle the data so that _team events are counted as a single medal_. 
+
+```{r}
+## over time comparison of genders during winter
+count_sex <- df1 %>%
+  filter(Season =="Winter") %>%
+  group_by(Year, Sex) %>%
+  summarize(Athletes = length(unique(ID)))
+count_sex
+```
+
+```{r}
+## over time comparison graph 
+ggplot(count_sex, aes(x=Year, y=Athletes, group=Sex, color=Sex)) +
+  geom_point(size=2) +
+  geom_line()  +
+  scale_color_manual(values=c("blue","red")) +
+  labs(x = "Year", y = "Athletes", 
+       title="Male vs. Female Athletes Comparison Over time During Winter Olympics")
+```
+
+
+```{r}
+winner_sex <- df1 %>%
+  filter(!is.na(Medal)) %>%
+  filter(Season == 'Winter') %>%
+  group_by(Year, Sex) %>%
+  summarize(Athletes = length(unique(ID)))
+winner_sex
+```
+
+```{r}
+ggplot(winner_sex, aes(x=Year, y=Athletes, group=Sex, color=Sex)) +
+  geom_point(size=2) +
+  geom_line()  +
+  scale_color_manual(values=c("blue","red")) +
+  labs(x = "Year", y = "Athletes", 
+       title="Male vs. Female Winter Gold Medalists Over time")
+```
+I would use the second visualization that shows the comparison of total medal counts across all Winter Olympics between female and male athletes because the lines show a similar trend. I think the graph does a good job of showing that even though female athletes have not been included in the Olympics for as long as men have, the number of medals won by female athletes is increasing in the same manner as the male athletes. The line itself is below the male athletes because historically, there has been less female competitors, but now female athletes are improving at the same rate. 
+
+
+#### 2. Medal Counts adjusted by Population, GDP
+
+There are different ways to calculate "success". Consider the following variants and choose one (and make sure your choice is clear in the visualization):  
+  - Just consider gold medals.  
+  - Simply add up the number of medals of different types.    
+  - Create an index in which medals are valued differently. (gold=3, silver=2, bronze=1).   
+  - A reasonable other way that you prefer.
+  
+```{r}
+## count of all medals won during Winter Olympics
+med_count <- df1 %>% 
+  filter(Season =="Winter") %>%
+  filter(!is.na(Medal)) %>% 
+  group_by(Country, Medal) %>%
+  summarize(isMedal = n()) %>%
+     pivot_wider(
+    names_from = Medal,
+    values_from = isMedal
+  )
+med_count
+```
+
+```{r}
+## considering only gold medals won during Winter
+gold_med <-df1 %>% 
+  filter(Season =="Winter") %>%
+  filter(Medal=='Gold') %>% 
+  group_by(NOC) %>%
+  group_by(Country) %>%
+  summarize(gold_med_count = n()) %>% 
+  arrange(desc(gold_med_count)) 
+gold_med
+```
+
+```{r}
+library(plotly)
+## plot gold medals
+gmplot <- gold_med %>%
+  ggplot(aes(x=Country, y=gold_med_count, fill=Country)) + 
+  geom_bar(stat='identity') + 
+  coord_flip() + labs(x="Olympic Year",y="Gold Medals", title = "Winter Gold Medals")
+ggplotly(gmplot)
+```
+
+```{r}
+## top 10 times country won gold medal
+top10 <- gold_med %>% 
+  ungroup() %>%
+  slice(1:10)
+top10
+```
+
+```{r}
+## plot for top 10 countries who won gold medals
+top10plot <- top10 %>%
+  ggplot(aes(x=Country, y=gold_med_count, fill=Country)) + 
+  geom_bar(stat='identity', position = "stack") + 
+  labs(x="Countries",y="Gold Medals", 
+       title = "Most Winter Gold Medals Won by a Country (Top 10)")
+ggplotly(top10plot)
+```
+#### Unadjusted Rankings
+According to both plots with unadjusted rankings, Canada has won the most gold medals the most times out of all of the Winter Olympics.
+  
+Now, adjust the ranking of medal success by (a) GDP per capita and (b) population. You have now three rankings: unadjusted ranking, adjusted by GDP per capita, and adjusted by population.
+
+
+#### Adjusted by GDP per Capita
+```{r}
+## adjusted by GDP per capita 
+gdp_gold <-df1 %>% 
+  filter(Season =="Winter") %>%
+  filter(Medal =="Gold") %>%
+  group_by(Country, `GDP per Capita`) %>%
+  summarize(gold_med_count=n_distinct(ID)) %>%
+  arrange(desc(gold_med_count))
+```
+
+```{r}
+## top 10 countries adjusted by gdp 
+adj_gdp <-gdp_gold %>% 
+ungroup() %>%
+slice(1:10)
+```
+
+```{r}
+## top 10 plot gold medals adjusted by gdp per capita
+gdpplot <- ggplot(adj_gdp, aes(x = Country , y =`gold_med_count`/`GDP per Capita`, 
+      fill = Country)) + geom_bar(stat='identity') +  
+  labs(x ="Country", y = "Medals/GDP per Capita", 
+      title = "Success Measure of Gold Medals in the Winter Olympics (Top 10 Adjusted by GDP per Capita)") 
+ggplotly(gdpplot)
+```
+
+#### Adjusted by Population 
+```{r}
+## gold medals adjusted by population
+pop_gold <-df1 %>% 
+  filter(Season =="Winter") %>%
+  filter(Medal =="Gold") %>%
+  group_by(Country, Population) %>%
+  summarize(gold_med_count=n_distinct(ID)) %>%
+  arrange(desc(gold_med_count)) 
+```
+
+```{r}
+## top 10 countries adjusted by pop
+adj_pop <-pop_gold %>% 
+ungroup() %>%
+slice(1:10)
+```
+
+```{r}
+popplot <- adj_pop %>%
+  ggplot(aes(x=Country, y=gold_med_count/Population, 
+             fill= Country)) + 
+  geom_bar(stat='identity', position = "stack") + 
+  labs(x="Country",y="Medal/Population", 
+       title = "Success Measure of Gold Medals in the Winter Olympics (Top 10 Adjusted by Population)")
+ggplotly(popplot)
+```
+
+When not adjusted for population or GDP per capita, Canada has won the most gold medals in the Winter Olympics. When the rankings are adjusted for GDP per capita, we can see that Russia has won the most gold medals in the Winter Olympics when accounting for GDP per capita. Finally, when adjusting for population, Norway has won the most gold medals relative to its small size. 
+
+
+#### 3. Host Country Advantage
+
+Until the 2014 Sochi Winter Olympics (our data for Winter Olympics end here), there were 19 host cities. Calculate whether the host nation had an advantage. That is calculate whether the host country did win more medals when the Winter Olympics was in their country compared to other times. 
+
+Note, that the 19 host cities are noted in the data but not the countries they are located in. This happens commonly and often Wikipedia has the [kind of additional data you want for the task](https://en.wikipedia.org/wiki/Winter_Olympic_Games). To save you some time, here is a quick way to get this kind of table from Wikipedia into R:
+
+```{r echo=TRUE, eval=FALSE}
+library(rvest)
+library(stringr)
+library(tidyverse)
+wiki_hosts <- read_html("https://en.wikipedia.org/wiki/List_of_Olympic_Games_host_cities")
+hosts <- html_table(html_nodes(wiki_hosts, "table")[[2]], fill=TRUE)[-1]
+hosts %>% filter(Winter != "") %>%
+  select(City, Country, Year)
+```
+
+```{r}
+## countries that have hosted
+host_country <- df1 %>% 
+  filter(Country == "France" | 
+           Country == "Switzerland" |
+           Country == "United States" |
+           Country == "Germany" |
+           Country == "Japan" |
+           Country == "Italy" |
+           Country == "Norway" |
+           Country == "Austria" |
+           Country == "Yugoslavia" |
+           Country == "Canada" |
+           Country == "Russia" |
+           Country == "South Korea" |
+           Country == "China")
+
+
+## medals won by germany
+germany_medal <- host_country %>% 
+  filter(Season =="Winter") %>%
+  filter(Country == "Germany") %>%
+  group_by(Year) %>% 
+  summarize(Medals = n())
+```
+
+Provide a visualization of the host country advantage (or absence thereof).
+
+```{r}
+## plot for germany
+germany_plot <- ggplot(germany_medal, aes(x = Year , y = Medals)) + 
+  geom_bar(aes(fill = (Year == 1936)), stat='identity') +
+  scale_fill_discrete(name = "Host Year") +
+  labs(x ="Year", y = "Number of Medals", 
+      title = "Winter Olympic Medals Won by Germany") 
+ggplotly(germany_plot)
+```
+
+In the graph above, I have selected a host country, Germany, which has hosted the Winter Olympics once in 1936. Here, we can see that during the highlighted host year, the total number of medals won for Germany was 67. This is a drastic jump from the previous Winter Olympics in 1932 where Germany won only 23 medals. Although, that number has increased to as many as 271 medals in recent years even though Germany has not been a host country since. In Germany's case, being a host country might have provided a slight advantage back when the Winter Olympics was not as large or developed as it is now. However, overall I think being a host country did not provide a notable advantage compared to times where they did not host. I would attribute this increase to the improvement of German athletes and the increase of events/amount of athletes rather than the fact that Germany was not a host country. 
+
+```{r}
+## US medals
+US_medal <- host_country %>% 
+  filter(Season =="Winter") %>%
+  filter(Country == "United States") %>%
+  group_by(Year) %>% 
+  summarize(Medals = n())
+
+## plot for US medals
+US_plot <- ggplot(US_medal, aes(x = Year , y = Medals)) + 
+  geom_bar(aes(fill = (Year == 1932 |
+                         Year == 1960 |
+                         Year == 1980 |
+                         Year == 2002)), stat='identity') +
+  scale_fill_discrete(name = "Host Year") +
+  labs(x ="Year", y = "Number of Medals", 
+      title = "Winter Olympic Medals Won by USA") 
+ggplotly(US_plot)
+```
+In this plot, the highlighted bars are the years that the United States hosted the Winter Olympics. Again, we can see that there is steady improvement in the number of medals won each Winter Olympics. For example, in 2006 when the US did not host, the team received 325 medals. In the previous Winter Olympics in 2002 when the US was a host country, the team received 313 medals, which is less than the following year when it wasn't hosting. Therefore, similarly to Germany's case, we can attribute the increase in medals to the improvement of the athletes and increase of events/participants again. 
+
+```{r}
+## Canada medals
+canada_medal <- host_country %>% 
+  filter(Season =="Winter") %>%
+  filter(Country == "Canada") %>%
+  group_by(Year) %>% 
+  summarize(Medals = n())
+
+## plot for Canada medals
+canada_plot <- ggplot(canada_medal, aes(x = Year , y = Medals)) + 
+  geom_bar(aes(fill = (Year == 1988 |
+                         Year == 2010)), stat='identity') +
+  scale_fill_discrete(name = "Host Year") +
+  labs(x ="Year", y = "Number of Medals", 
+      title = "Winter Olympic Medals Won by Canada") 
+ggplotly(canada_plot)
+```
+In this plot above, we see the number of medals won by Canada during the Winter Olympics. Canada's case is different from the US and Germany. In looking at the year 1988 when Canada hosted the Winter Olympics for the first time, we can see that the team won 190 medals. This is a large jump from 1984 where Canada did not host and won 91 medals. Additionally, in 1992 where Canada also did not host, we see a decrease from 190 medals to 186 medals. Subsequently in 1994, the number of medals decreased even more to 149 medals. In Canada's case, in that span of time, being a host country did provide a slight advantage in the total number of medals won at the Olympic games. However, again, I do believe the most dominant effect in increasing the amount of medals won is the improvement of the athletes and the augmentation of the Winter Olympics as a whole. 
+
+#### 4. Most successful athletes
+
+a) Now, let's look at the most successful athletes. Provide a visual display of the most successful Winter Olympics athletes of all time.
+
+```{r}
+## most successful winter athletes 
+athletes <-df1 %>% 
+  filter(Season =="Winter") %>%
+  filter(Medal =="Gold") %>%
+  group_by(Name, Medal, Country) %>%
+  summarize(gold_med_count=n()) %>%
+  arrange(desc(gold_med_count)) 
+
+## top 10 athletes
+athletes10 <- athletes %>% 
+ungroup() %>%
+slice(1:10)
+
+## plot top 10 athletes
+athletes10_plot <- ggplot(athletes10, aes(x = gold_med_count, y = Name, 
+                                         fill = Country)) +
+  labs(x ="Number of Gold Medals", y ="Athlete", 
+      title = "Most Successful Winter Olympic Athletes (Top 10)") +
+  geom_point()
+ggplotly(athletes10_plot)
+```
+b) Chose of of the athlete specific dimensions (e.g. gender, height, weight) and visualize an interesting pattern in the data.
+
+```{r}
+## success by gender 
+ath_gend <- df1 %>% 
+  filter(Season == "Winter") %>%
+  filter(Medal == "Gold") %>%
+  group_by(Name, Sex) %>%
+  summarize(gold_med_count = n()) %>%
+  arrange(desc(gold_med_count)) 
+
+top_gend <- ath_gend %>% 
+  ungroup() %>% 
+  slice(1:20)
+
+gend_plot <- ggplot(top_gend, aes(x = gold_med_count, y = Name, fill = Sex)) +
+  labs(x ="Number of Gold Medals", y ="Athlete", 
+      title = "Top 10 Winter Olympic Gold Medalists by Gender") +
+  geom_point()
+ggplotly(gend_plot)
+```
+From this plot, we can see that the most winningest Winter Olympic athlete is Ole Einar Bjrndalen who is male (8 gold medals). The second place is tied by both a male and female athletes at 6 gold medals.
+
+
+### Interactivity
+
+#### 5. Make two plots interactive
+
+Choose 2 of the plots you created above and add interactivity. One of the plots needs to be written in `plotly` rather than just using the `ggplotly` automation. Briefly describe to the editor why interactivity in these visualization is particularly helpful for a reader.
+
+
+
+```{r}
+## plotly of Most Winter Gold Medals Won by a Country (Top 10)
+plot_ly(top10, y = ~gold_med_count, x = ~Country,
+             color= ~Country, 
+             type = "bar", mode='point')
+```
+
+This plot shows the top 10 gold medal winners in the Winter Olympics. Plotly is helpful in this situation because you can see the exact total amount of gold medals won by hovering over each bar. I also used ggplotly for this graph previously, but I think that plotly's aesthetics/visualization are more pleasant than ggplotly's theme.
+
+```{r}
+## ggplotly of Male vs. Female Winter Gold Medalists Over time
+ath_plot <- ggplot(winner_sex, aes(x=Year, y=Athletes, group=Sex, color=Sex)) +
+  geom_point(size=2) +
+  geom_line()  +
+  scale_color_manual(values=c("blue","red")) +
+  labs(x = "Year", y = "Athletes", 
+       title="Male vs. Female Winter Gold Medalists Over time")
+ggplotly(ath_plot)
+```
+
+This plot shows the comparison between male and female winter gold medalists over time. Again, here ggplotly is helpful in pinpointing the exact the year, scrolling over, and being able to see the exact number of gold medalists on each line. The graph itself is very simple and easy to discern the trend without being too crowded with unnecessary data points. 
+
+#### 6. Data Table
+
+Prepare a selected data set and add a `datatable` to the output. Make sure the columns are clearly labelled. Select the appropriate options for the data table (e.g. search bar, sorting, column filters etc.). Suggest to the editor which kind of information you would like to provide in a data table in the online version of the article and why.
+
+#### Data Table for USA Sports
+```{r}
+library(DT)
+## choosing only USA because dataset too large
+data_table <- df1 %>% 
+  filter(NOC == 'USA') %>%
+  select(Year, Sport, Name, Medal) 
+
+datatable(
+  data_table, colnames = c('Year','Sport', 'Name', 'Medal'),
+  filter = list(position = 'top', clear = FALSE),
+  options = list(
+    search = list(search = ''),
+    pageLength = 10
+  )
+)
+```
+## Technical Details
+
+The data comes in a reasonably clean Excel data set. If needed for your visualization, you can add visual drapery like flag icons, icons for sports, icons for medals etc. but your are certainly not obligated to do that. 
+
+Part of the your task will be transforming the dataset into a shape that allows you to plot what you want in `ggplot2`. For some plots, you will necessarily need to be selective in what to include and what to leave out. 
+
+Make sure to use at least three different types of graphs, e.g. line graphs, scatter, histograms, bar chats, dot plots, heat maps etc.
+
+
+## Submission
+
+Please follow the [instructions](/Exercises/homework_submission_instructions.md) to submit your homework. The homework is due on Wednesday, February 16 at 5pm
+
+## Please stay honest!
+
+Yes, the medal counts of the olympics have surely been analyzed before.  If you do come across something, please no wholesale copying of other ideas. We are trying to practice and evaluate your abilities in using ggplot2 and data visualization not the ability to do internet searches. Also, this is an individually assigned exercise -- please keep your solution to yourself.
